@@ -1,0 +1,13 @@
+<?php
+
+function _references_migrate_references_field_to_entityreference_field($field_info) {
+  $field_name = $field_info['field_name'];
+  
+  // Store instances to be able to recreate them.
+  $instances = field_read_instances(
+    array('field_name' => $field_name),
+    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
+  );
+
+
+}

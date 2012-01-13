@@ -1,0 +1,6 @@
+name = "References Migration"
+description = "Migrate references fields (node reference, user reference) to entity reference fields."
+package = Fields
+core = 7.x
+dependencies[] = entityreference
+dependencies[] = references
