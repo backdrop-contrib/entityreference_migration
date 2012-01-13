@@ -2,12 +2,158 @@
 
 function _references_migrate_references_field_to_entityreference_field($field_info) {
   $field_name = $field_info['field_name'];
-  
   // Store instances to be able to recreate them.
   $instances = field_read_instances(
     array('field_name' => $field_name),
     array('include_inactive' => TRUE, 'include_deleted' => TRUE)
   );
 
+  // Create table for migration.
+  $table_name = _field_sql_storage_tablename($field_info);
+  $temp_table_name = 'entityreference_migration_' . $table_name;
+  if (!db_table_exists($temp_table_name)) {
+    $schema = drupal_get_schema($table_name, TRUE);
+    $schema['name'] = $temp_table_name;
+    db_create_table($temp_table_name, $schema);
+  }
 
+  // Make sure we don't stumble over leftovers of broken migrations.
+  $deleted_table_name = _field_sql_storage_tablename(array('deleted' => TRUE) + $field_info);
+  $deleted_revision_table_name = _field_sql_storage_revision_tablename(array('deleted' => TRUE) + $field_info);
+  if ($key == $field_info['id'] && db_table_exists($table_name)) {
+    if (db_table_exists($deleted_table_name)) {
+      db_drop_table($deleted_table_name);
+    }
+    if (db_table_exists($deleted_revision_table_name)) {
+      db_drop_table($deleted_revision_table_name);
+    }
+  }
+
+  // Export data.
+  if (db_table_exists($table_name)) {
+    $results = db_select($table_name)
+      ->fields($table_name)
+      ->execute()
+      ->fetchAll(PDO::FETCH_ASSOC);
+    if ($results) {
+
+      db_truncate($temp_table_name)->execute();
+
+      $result = array_shift($results);
+      $insert = db_insert($temp_table_name);
+      $insert->fields(array_keys($result), $result);
+      foreach ($results as $result) {
+        $insert->values($result);
+      }
+      $insert->execute();
+    }
+  }
+
+  foreach ($instances as $instance) {
+    field_delete_instance($instance);
+    field_purge_instance($instance);
+  }
+  field_delete_field($field_name);
+  field_purge_field($field_info);
+
+  _references_migrate_references_field_to_entityreference_field_create_field($field_info);
+
+  // Create the field instances
+  foreach ($instances as $instance) {
+    _references_migrate_references_field_to_entityreference_field_create_instance($instance);
+  }
+
+}
+
+function _references_migrate_references_field_to_entityreference_field_create_field($field_info) {
+  $field_name = $field_info['field_name'];
+  // Recreate fields by using entityreference.
+  $target_bundles = array();
+  if (isset($field_info['settings']['referenceable_types'])) {
+    $target_bundles = array_filter($field_info['settings']['referenceable_types']);
+  }
+  $entityreference_field = array(
+    'field_name' => $field_name,
+    'type' => 'entityreference',
+    'module' => 'entityreference',
+    'entity_types' => array(),
+    'foreign keys' => array(),
+    'indexes' => array(
+      'target_entity' => array(
+        '0' => 'target_type',
+        '1' => 'target_id',
+      ),
+    ),
+    'settings' => array(
+      'handler' => 'base',
+      'handler_settings' => array (
+        'target_bundles' => $target_bundles,
+      ),
+      'handler_submit' => 'Change handler',
+      'target_type' => (($field_info['type'] == 'node_reference') ? 'node' : 'user'),
+    ),
+    'cardinality' => $field_info['cardinality'],
+    'locked' => $field_info['locked'],
+    'active' => $field_info['active'],
+    'translatable' => $field_info['translatable'],
+  );
+  $entityreference_field = field_create_field($entityreference_field);
+  return $entityreference_field;
+}
+
+function _references_migrate_references_field_to_entityreference_field_create_instance($instance) {
+  $entityreference_instance = array(
+    'label' => $instance['label'],
+    'required' => $instance['required'],
+    'description' => $instance['description'],
+    'default_value' => $instance['default_value'],
+    'field_name' => $instance['field_name'],
+    'entity_type' => $instance['entity_type'],
+    'bundle' => $instance['bundle'],
+    'deleted' => $instance['deleted'],
+  );
+  // Add in the widget and appropriate settings (TODO for more flexibility)
+  if (isset($instance['widget'])) {
+    $entityreference_instance['widget'] = array(
+      'weight' => $instance['widget']['weight'],
+      'type' => 'entityreference_autocomplete',
+      'module' => 'entityreference',
+      'active' => 1,
+      'settings' => array(
+        'match_operator' => 'CONTAINS',
+        'size' => 60,
+        'path' => '',
+      )
+    );
+  }
+  // Add in the display and appropriate settings
+  if (isset($instance['display'])) {
+    foreach ($instance['display'] as $display_name => $instance_display) {
+      $entityreference_instance['display'] = array(
+        'label' => $instance_display['label'],
+        'weight' => $instance_display['weight'],
+        'module' => 'entityreference',
+      );
+      if ($instance_display['type'] == 'node_reference_node' || $instance_display['type'] == 'user_reference_user') {
+        $entityreference_instance['display']['type'] = 'entityreference_entity_view';
+        $entityreference_instance['display']['settings'] = array(
+          'view_mode' => $instance_display['type'][$instance_display['module'] .'_view_mode'],
+        );
+      }
+      else if ($instance_display['type'] == 'node_reference_default' || $instance_display['type'] == 'user_reference_default') {
+        $entityreference_instance['display']['type'] = 'entityreference_label';
+        $entityreference_instance['display']['settings'] = array(
+          'link' => TRUE,
+        );
+      }
+      else {
+        $entityreference_instance['display']['type'] = 'entityreference_label';
+        $entityreference_instance['display']['settings'] = array(
+          'link' => TRUE,
+        );
+      }
+    }
+  }
+  $entityreference_instance = field_create_instance($entityrefrence_instance);
+  return $entityreference_instance;
 }

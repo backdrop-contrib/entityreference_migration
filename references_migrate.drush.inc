@@ -80,22 +80,19 @@ function _drush_references_migrate_batches_finished($success, $results, $operati
 
 function _drush_references_migrate_references_field($field_info) {
   drush_print(dt("Processing @field_name", array('@field_name' => $field_info['field_name'])));
+
+  drush_print_r($field_info);
+  // Read the instances for copying to the entityreference variant.
   $instances = field_read_instances(
     array('field_name' => $field_info['field_name']),
     array('include_inactive' => TRUE, 'include_deleted' => TRUE)
   );
   drush_print_r($instances);
-  
+
   if (!in_array($field_info['type'], array('node_reference', 'user_reference'))) {
     drush_set_error(dt("Field @field is not a references field.", array('@field' => $field_name)));
   }
   else {
-    // Store instances to be able to recreate them.
-    $instances = field_read_instances(
-      array('field_name' => $field_info['field_name']),
-      array('include_inactive' => TRUE, 'include_deleted' => TRUE)
-    );
-
-    _references_migrate_references_field_to_entityreference_field($field_info);
+//    _references_migrate_references_field_to_entityreference_field($field_info);
   }
 }
