@@ -198,6 +198,6 @@ function _references_migrate_references_field_to_entityreference_field_create_in
   }
   drush_print_r($entityreference_field);
   drush_print_r($entityreference_instance);
-  $entityreference_instance = field_create_instance($entityrefrence_instance);
+  $entityreference_instance = field_create_instance($entityreference_instance);
   return $entityreference_instance;
 }
