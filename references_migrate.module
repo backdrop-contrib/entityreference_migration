@@ -1,12 +1,7 @@
 <?php
 
-function _references_migrate_references_field_to_entityreference_field($field_info) {
+function _references_migrate_references_field_to_entityreference_field($field_key, $field_info) {
   $field_name = $field_info['field_name'];
-  // Store instances to be able to recreate them.
-  $instances = field_read_instances(
-    array('field_name' => $field_name),
-    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
-  );
 
   // Create table for migration.
   $table_name = _field_sql_storage_tablename($field_info);
@@ -20,7 +15,7 @@ function _references_migrate_references_field_to_entityreference_field($field_in
   // Make sure we don't stumble over leftovers of broken migrations.
   $deleted_table_name = _field_sql_storage_tablename(array('deleted' => TRUE) + $field_info);
   $deleted_revision_table_name = _field_sql_storage_revision_tablename(array('deleted' => TRUE) + $field_info);
-  if ($key == $field_info['id'] && db_table_exists($table_name)) {
+  if ($field_key == $field_info['id'] && db_table_exists($table_name)) {
     if (db_table_exists($deleted_table_name)) {
       db_drop_table($deleted_table_name);
     }
@@ -48,6 +43,12 @@ function _references_migrate_references_field_to_entityreference_field($field_in
       $insert->execute();
     }
   }
+  
+  // Store instances to be able to recreate them.
+  $instances = field_read_instances(
+    array('field_name' => $field_name),
+    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
+  );
 
   foreach ($instances as $instance) {
     field_delete_instance($instance);
@@ -56,13 +57,54 @@ function _references_migrate_references_field_to_entityreference_field($field_in
   field_delete_field($field_name);
   field_purge_field($field_info);
 
-  _references_migrate_references_field_to_entityreference_field_create_field($field_info);
+  $entityreference_field = _references_migrate_references_field_to_entityreference_field_create_field($field_info);
 
   // Create the field instances
   foreach ($instances as $instance) {
-    _references_migrate_references_field_to_entityreference_field_create_instance($instance);
+    _references_migrate_references_field_to_entityreference_field_create_instance($entityreference_field, $instance);
   }
 
+  $entityreference_table_name = _field_sql_storage_tablename($entityreference_field);
+  $entityreference_revision_table_name = _field_sql_storage_revision_tablename($entityreference_field);
+
+  // And now migrate data.
+  $results = db_select($temp_table_name)
+    ->fields($temp_table_name)
+    ->execute()
+    ->fetchAll(PDO::FETCH_ASSOC);
+
+  if ($results) {
+    db_truncate($entityreference_table_name)->execute();
+    db_truncate($entityreference_revision_table_name)->execute();
+
+    $insert = db_insert($entityreference_table_name);
+    $insert_revision = db_insert($entityreference_revision_table_name);
+    foreach ($results as $key => $result) {
+      $target_id_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
+      $result[$field_name . '_target_id'] = $result[$target_id_field];
+      $result[$field_name . '_target_type'] = $entityreference_field['settings']['target_type'];
+      unset($result[$target_id_field]);
+
+      if ($key) {
+        $insert->values($result);
+        $insert_revision->values($result);
+      }
+      else {
+        $insert->fields(array_keys($result), $result);
+        $insert_revision->fields(array_keys($result), $result);
+      }
+    }
+    $insert->execute();
+    $insert_revision->execute();
+    db_drop_table($temp_table_name);
+    // Cleanup
+    if (db_table_exists($deleted_table_name)) {
+      db_drop_table($deleted_table_name);
+    }
+    if (db_table_exists($deleted_revision_table_name)) {
+      db_drop_table($deleted_revision_table_name);
+    }
+  }
 }
 
 function _references_migrate_references_field_to_entityreference_field_create_field($field_info) {
@@ -101,7 +143,7 @@ function _references_migrate_references_field_to_entityreference_field_create_fi
   return $entityreference_field;
 }
 
-function _references_migrate_references_field_to_entityreference_field_create_instance($instance) {
+function _references_migrate_references_field_to_entityreference_field_create_instance($entityreference_field, $instance) {
   $entityreference_instance = array(
     'label' => $instance['label'],
     'required' => $instance['required'],
@@ -129,31 +171,33 @@ function _references_migrate_references_field_to_entityreference_field_create_in
   // Add in the display and appropriate settings
   if (isset($instance['display'])) {
     foreach ($instance['display'] as $display_name => $instance_display) {
-      $entityreference_instance['display'] = array(
+      $entityreference_instance['display'][$display_name] = array(
         'label' => $instance_display['label'],
         'weight' => $instance_display['weight'],
         'module' => 'entityreference',
       );
       if ($instance_display['type'] == 'node_reference_node' || $instance_display['type'] == 'user_reference_user') {
-        $entityreference_instance['display']['type'] = 'entityreference_entity_view';
-        $entityreference_instance['display']['settings'] = array(
+        $entityreference_instance['display'][$display_name]['type'] = 'entityreference_entity_view';
+        $entityreference_instance['display'][$display_name]['settings'] = array(
           'view_mode' => $instance_display['type'][$instance_display['module'] .'_view_mode'],
         );
       }
       else if ($instance_display['type'] == 'node_reference_default' || $instance_display['type'] == 'user_reference_default') {
-        $entityreference_instance['display']['type'] = 'entityreference_label';
-        $entityreference_instance['display']['settings'] = array(
+        $entityreference_instance['display'][$display_name]['type'] = 'entityreference_label';
+        $entityreference_instance['display'][$display_name]['settings'] = array(
           'link' => TRUE,
         );
       }
       else {
-        $entityreference_instance['display']['type'] = 'entityreference_label';
-        $entityreference_instance['display']['settings'] = array(
+        $entityreference_instance['display'][$display_name]['type'] = 'entityreference_label';
+        $entityreference_instance['display'][$display_name]['settings'] = array(
           'link' => TRUE,
         );
       }
     }
   }
+  drush_print_r($entityreference_field);
+  drush_print_r($entityreference_instance);
   $entityreference_instance = field_create_instance($entityrefrence_instance);
   return $entityreference_instance;
 }
