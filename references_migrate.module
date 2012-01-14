@@ -179,7 +179,7 @@ function _references_migrate_references_field_to_entityreference_field_create_in
       if ($instance_display['type'] == 'node_reference_node' || $instance_display['type'] == 'user_reference_user') {
         $entityreference_instance['display'][$display_name]['type'] = 'entityreference_entity_view';
         $entityreference_instance['display'][$display_name]['settings'] = array(
-          'view_mode' => $instance_display['type'][$instance_display['module'] .'_view_mode'],
+          'view_mode' => $instance_display['settings'][$instance_display['module'] .'_view_mode'],
         );
       }
       else if ($instance_display['type'] == 'node_reference_default' || $instance_display['type'] == 'user_reference_default') {
