@@ -78,7 +78,7 @@ function _drush_references_migrate_batches_finished($success, $results, $operati
   drush_print(dt('Succesfully migrated requested reference fields!'));
 }
 
-function _drush_references_migrate_references_field($field_key, $field_info) {
+function _drush_references_migrate_references_field($field_key, $field_info, &$context) {
   drush_print(dt("Processing @field_name", array('@field_name' => $field_info['field_name'])));
 
   // Read the instances for copying to the entityreference variant.
@@ -91,7 +91,8 @@ function _drush_references_migrate_references_field($field_key, $field_info) {
     drush_set_error(dt("Field @field is not a references field.", array('@field' => $field_name)));
   }
   else {
-    _references_migrate_references_field_to_entityreference_field($field_key, $field_info);
+    _references_migrate_references_field_to_entityreference_field($field_key, $field_info, $context);
+    drush_print(dt("Processed @field_name", array('@field_name' => $field_info['field_name'])));
   }
 }
 

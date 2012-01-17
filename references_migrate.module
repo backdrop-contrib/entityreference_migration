@@ -1,5 +1,27 @@
 <?php
 
+/**
+ * Implementation of hook_menu().
+ */
+function references_migrate_menu() {
+  $items = array();
+
+  $items['admin/content/migrate-references'] = array(
+    'title' => 'Migrate References',
+    'description' => 'Migrate References fields to Entity References.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('references_migrate_migrate_references_fields'),
+    'file' => 'references_migrate.pages.inc',
+    'access callback' => 'user_access',
+    'access arguments' => array('administer content types'),
+  );
+
+  return $items;
+}
+
+/**
+ * Migrate a field from references to entityreference.
+ */
 function _references_migrate_references_field_to_entityreference_field($field_key, $field_info) {
   $field_name = $field_info['field_name'];
 
@@ -105,8 +127,13 @@ function _references_migrate_references_field_to_entityreference_field($field_ke
       db_drop_table($deleted_revision_table_name);
     }
   }
+  
+  $context['message'] = t("Successfully migrated field @field", array('@field' => $field_name));
 }
 
+/**
+ * Create a new entityreference field based off the old field information.
+ */
 function _references_migrate_references_field_to_entityreference_field_create_field($field_info) {
   $field_name = $field_info['field_name'];
   // Recreate fields by using entityreference.
@@ -143,6 +170,9 @@ function _references_migrate_references_field_to_entityreference_field_create_fi
   return $entityreference_field;
 }
 
+/**
+ * Create the bundle instances of entityreference fields.
+ */
 function _references_migrate_references_field_to_entityreference_field_create_instance($entityreference_field, $instance) {
   $entityreference_instance = array(
     'label' => $instance['label'],
@@ -196,8 +226,6 @@ function _references_migrate_references_field_to_entityreference_field_create_in
       }
     }
   }
-  drush_print_r($entityreference_field);
-  drush_print_r($entityreference_instance);
   $entityreference_instance = field_create_instance($entityreference_instance);
   return $entityreference_instance;
 }
