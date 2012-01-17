@@ -4,3 +4,5 @@ package = Fields
 core = 7.x
 dependencies[] = entityreference
 dependencies[] = references
+
+files[] = references.pages.inc
