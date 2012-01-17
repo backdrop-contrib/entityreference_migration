@@ -56,7 +56,7 @@ function drush_entityreference_migrate_references($field_name = '') {
   $batch = array(
     'operations' => array(),
     'finished' => '_drush_references_migrate_batches_finished',
-    'title' => t('Start migrating reference fields.'),
+    'title' => dt('Start migrating reference fields.'),
     'init_message' => dt('Preparing to migrate reference fields.'),
     'progress_message' => dt('Migrating references fields.'),
     'error_message' => dt('Reference field could not migrate content successfully.'),
@@ -80,12 +80,6 @@ function _drush_references_migrate_batches_finished($success, $results, $operati
 
 function _drush_references_migrate_references_field($field_key, $field_info, &$context) {
   drush_print(dt("Processing @field_name", array('@field_name' => $field_info['field_name'])));
-
-  // Read the instances for copying to the entityreference variant.
-  $instances = field_read_instances(
-    array('field_name' => $field_info['field_name']),
-    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
-  );
 
   if (!in_array($field_info['type'], array('node_reference', 'user_reference'))) {
     drush_set_error(dt("Field @field is not a references field.", array('@field' => $field_name)));
