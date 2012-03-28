@@ -217,7 +217,6 @@ function _references_migrate_references_field_to_entityreference_field($field_ke
     foreach ($results as $key => $result) {
       $target_id_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
       $result[$field_name . '_target_id'] = $result[$target_id_field];
-      $result[$field_name . '_target_type'] = $entityreference_field['settings']['target_type'];
       unset($result[$target_id_field]);
 
       if ($key) {
@@ -260,8 +259,7 @@ function _references_migrate_references_field_to_entityreference_field_create_fi
     'foreign keys' => array(),
     'indexes' => array(
       'target_entity' => array(
-        '0' => 'target_type',
-        '1' => 'target_id',
+        '0' => 'target_id',
       ),
     ),
     'settings' => array(
@@ -270,7 +268,6 @@ function _references_migrate_references_field_to_entityreference_field_create_fi
         'target_bundles' => $target_bundles,
       ),
       'handler_submit' => 'Change handler',
-      'target_type' => (($field_info['type'] == 'node_reference') ? 'node' : 'user'),
     ),
     'cardinality' => $field_info['cardinality'],
     'locked' => $field_info['locked'],
