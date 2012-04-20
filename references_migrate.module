@@ -268,6 +268,7 @@ function _references_migrate_references_field_to_entityreference_field_create_fi
         'target_bundles' => $target_bundles,
       ),
       'handler_submit' => 'Change handler',
+      'target_type' => (($field_info['type'] == 'node_reference') ? 'node' : 'user'),
     ),
     'cardinality' => $field_info['cardinality'],
     'locked' => $field_info['locked'],
