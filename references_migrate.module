@@ -118,7 +118,7 @@ function _references_migrate_references_field_to_entityreference_field($field_ke
 
   // Create table for migration.
   $table_name = _field_sql_storage_tablename($field_info);
-  $temp_table_name = 'entityreference_migration_' . $table_name;
+  $temp_table_name = substr('er_m_' . $table_name, 0, 63);
   if (!db_table_exists($temp_table_name)) {
     $schema = drupal_get_schema($table_name, TRUE);
     $schema['name'] = $temp_table_name;
