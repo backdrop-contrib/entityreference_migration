@@ -158,21 +158,23 @@ function _references_migrate_references_field_to_entityreference_field($field_ke
   }
 
   // Migrate any views.
-  $views = views_get_all_views(TRUE);
-  foreach ($views as $view) {
-    // Let us first try with arguments.
-    $current_argument_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
-    $new_argument_field = $field_name .'_target_id';
-    foreach ($view->display as $display_key => $display) {
-      if (!empty($display->display_options['arguments'])) {
-        foreach ($display->display_options['arguments'] as $argument_key => $argument) {
-          if (!empty($argument['field']) && $argument['field'] == $current_argument_field) {
-            $new_argument_key = str_replace($current_argument_field, $new_argument_field, $argument_key);
-            $view->display[$display_key]->display_options['arguments'][$new_argument_key] = $view->display[$display_key]->display_options['arguments'][$argument_key];
-            $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id']);
-            $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field']);
-            unset($view->display[$display_key]->display_options['arguments'][$argument_key]);
-            $view->save();
+  if (module_exists('views')) {
+    $views = views_get_all_views(TRUE);
+    foreach ($views as $view) {
+      // Let us first try with arguments.
+      $current_argument_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
+      $new_argument_field = $field_name .'_target_id';
+      foreach ($view->display as $display_key => $display) {
+        if (!empty($display->display_options['arguments'])) {
+          foreach ($display->display_options['arguments'] as $argument_key => $argument) {
+            if (!empty($argument['field']) && $argument['field'] == $current_argument_field) {
+              $new_argument_key = str_replace($current_argument_field, $new_argument_field, $argument_key);
+              $view->display[$display_key]->display_options['arguments'][$new_argument_key] = $view->display[$display_key]->display_options['arguments'][$argument_key];
+              $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id']);
+              $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field']);
+              unset($view->display[$display_key]->display_options['arguments'][$argument_key]);
+              $view->save();
+            }
           }
         }
       }
