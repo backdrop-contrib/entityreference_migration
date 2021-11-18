@@ -73,7 +73,7 @@ function entityreference_migration_migrate_references_fields($form, &$form_state
 function entityreference_migration_migrate_references_fields_submit($form, &$form_state) {
   $values = $form_state['values'];
   $field_infos = $values['field_information'];
-  
+
   // Define the batch.
   $batch = array(
     'operations' => array(),
@@ -128,7 +128,7 @@ function _entityreference_migration_references_field_to_entityreference_field($f
   // Make sure we don't stumble over leftovers of broken migrations.
   $deleted_table_name = _field_sql_storage_tablename(array('deleted' => TRUE) + $field_info);
   $deleted_revision_table_name = _field_sql_storage_revision_tablename(array('deleted' => TRUE) + $field_info);
-  if ($field_key == $field_info['id'] && db_table_exists($table_name)) {
+  if ($field_key == $field_name && db_table_exists($table_name)) {
     if (db_table_exists($deleted_table_name)) {
       db_drop_table($deleted_table_name);
     }

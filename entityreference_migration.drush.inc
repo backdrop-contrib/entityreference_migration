@@ -24,7 +24,7 @@ function entityreference_migration_drush_command() {
     'bootstrap' => DRUSH_BOOTSTRAP_DRUPAL_FULL,
     'aliases' => array('emr'),
   );
-  
+
   return $items;
 }
 
@@ -52,7 +52,7 @@ function drush_entityreference_migration_references($field_name = '') {
     );
     $field_infos = $node_field_infos + $user_field_infos;
   }
-  
+
   $batch = array(
     'operations' => array(),
     'finished' => '_drush_entityreference_migration_batches_finished',
@@ -61,7 +61,7 @@ function drush_entityreference_migration_references($field_name = '') {
     'progress_message' => dt('Migrating references fields.'),
     'error_message' => dt('Reference field could not migrate content successfully.'),
   );
-  
+
   foreach ($field_infos as $key => $field_info) {
     $batch['operations'][] = array(
       '_drush_entityreference_migration_references_field', array($key, $field_info),
@@ -89,4 +89,3 @@ function _drush_entityreference_migration_references_field($field_key, $field_in
     drush_print(dt("Processed @field_name", array('@field_name' => $field_info['field_name'])));
   }
 }
-
