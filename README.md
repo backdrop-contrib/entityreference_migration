@@ -11,6 +11,8 @@ Install this module using the official Backdrop CMS instructions at <https://bac
 Configuration
 -------------
 
+Ensure you have a full database and configuration backup before proceeding!
+
 Navigate to `admin/content/migrate-references` and start the process.
 
 

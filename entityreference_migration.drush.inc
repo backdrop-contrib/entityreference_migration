@@ -82,7 +82,7 @@ function _drush_entityreference_migration_references_field($field_key, $field_in
   drush_print(dt("Processing @field_name", array('@field_name' => $field_info['field_name'])));
 
   if (!in_array($field_info['type'], array('node_reference', 'user_reference'))) {
-    drush_set_error(dt("Field @field is not a references field.", array('@field' => $field_name)));
+    drush_set_error(dt("Field @field is not a references field.", array('@field' => $field_info['field_name'])));
   }
   else {
     _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info, $context);
