@@ -9,7 +9,7 @@ function entityreference_migration_menu() {
   $items['admin/content/migrate-references'] = array(
     'title' => 'Migrate References Fields',
     'description' => 'Migrate References fields to Entity References.',
-    'page callback' => 'drupal_get_form',
+    'page callback' => 'backdrop_get_form',
     'page arguments' => array('entityreference_migration_migrate_references_fields'),
     'access callback' => 'user_access',
     'access arguments' => array('administer content types'),
@@ -95,18 +95,18 @@ function entityreference_migration_migrate_references_fields_submit($form, &$for
 }
 
 function _entityreference_migration_batches_finished($success, $results, $operations) {
-  drupal_set_message(t('Succesfully migrated requested reference fields!'));
+  backdrop_set_message(t('Succesfully migrated requested reference fields!'));
 }
 
 function _entityreference_migration_references_field($field_key, $field_info, &$context) {
   $context['message'] = t("Processing @field_name", array('@field_name' => $field_info['field_name']));
 
   if (!in_array($field_info['type'], array('node_reference', 'user_reference'))) {
-    drupal_set_message(t("Field @field is not a references field.", array('@field' => $field_name)), 'error');
+    backdrop_set_message(t("Field @field is not a references field.", array('@field' => $field_info['field_name'])), 'error');
   }
   else {
     _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info, $context);
-    drupal_set_message(t("Processed @field_name", array('@field_name' => $field_info['field_name'])));
+    backdrop_set_message(t("Processed @field_name", array('@field_name' => $field_info['field_name'])));
   }
 }
 
@@ -120,21 +120,9 @@ function _entityreference_migration_references_field_to_entityreference_field($f
   $table_name = _field_sql_storage_tablename($field_info);
   $temp_table_name = substr('er_m_' . $table_name, 0, 63);
   if (!db_table_exists($temp_table_name)) {
-    $schema = drupal_get_schema($table_name, TRUE);
+    $schema = backdrop_get_schema($table_name, TRUE);
     $schema['name'] = $temp_table_name;
     db_create_table($temp_table_name, $schema);
-  }
-
-  // Make sure we don't stumble over leftovers of broken migrations.
-  $deleted_table_name = _field_sql_storage_tablename(array('deleted' => TRUE) + $field_info);
-  $deleted_revision_table_name = _field_sql_storage_revision_tablename(array('deleted' => TRUE) + $field_info);
-  if ($field_key == $field_name && db_table_exists($table_name)) {
-    if (db_table_exists($deleted_table_name)) {
-      db_drop_table($deleted_table_name);
-    }
-    if (db_table_exists($deleted_revision_table_name)) {
-      db_drop_table($deleted_revision_table_name);
-    }
   }
 
   // Export data.
@@ -232,13 +220,13 @@ function _entityreference_migration_references_field_to_entityreference_field($f
     }
     $insert->execute();
     $insert_revision->execute();
+
     db_drop_table($temp_table_name);
-    // Cleanup
-    if (db_table_exists($deleted_table_name)) {
-      db_drop_table($deleted_table_name);
-    }
-    if (db_table_exists($deleted_revision_table_name)) {
-      db_drop_table($deleted_revision_table_name);
+
+    cache_flush('cache_field');
+    $entity_types = array_keys(entity_get_info());
+    foreach ($entity_types as $entity_type) {
+      cache_flush('cache_entity_' . $entity_type);
     }
   }
 }
@@ -253,6 +241,7 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
   if (isset($field_info['settings']['referenceable_types'])) {
     $target_bundles = array_filter($field_info['settings']['referenceable_types']);
   }
+
   $entityreference_field = array(
     'field_name' => $field_name,
     'type' => 'entityreference',
