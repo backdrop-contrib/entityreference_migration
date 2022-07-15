@@ -1,9 +1,8 @@
 name = "Reference to EntityReference Field Migration"
-description = "Migrate references fields (node reference, user reference) to entity reference fields."
+description = "Migrate references fields (node, user, term references) to entity reference fields."
 package = Fields
 backdrop = 1.x
 type = module
 dependencies[] = entityreference
-dependencies[] = references
 
 configure = admin/content/migrate-references
