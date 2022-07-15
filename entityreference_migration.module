@@ -21,15 +21,19 @@ function entityreference_migration_menu() {
 function entityreference_migration_migrate_references_fields($form, &$form_state) {
   // Load all references fields.
   $node_field_infos = field_read_fields(
-    array('type'=>'node_reference'),
+    array('type' => 'node_reference'),
     array('include_inactive' => TRUE, 'include_deleted' => TRUE)
   );
   $user_field_infos = field_read_fields(
-    array('type'=>'user_reference'),
+    array('type' => 'user_reference'),
+    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
+  );
+  $term_field_infos = field_read_fields(
+    array('type' => 'taxonomy_term_reference'),
     array('include_inactive' => TRUE, 'include_deleted' => TRUE)
   );
 
-  $field_infos = $node_field_infos + $user_field_infos;
+  $field_infos = $node_field_infos + $user_field_infos + $term_field_infos;
 
   if (count($field_infos) > 0) {
     $field_options = array();
@@ -42,10 +46,10 @@ function entityreference_migration_migrate_references_fields($form, &$form_state
       );
       $options_instances = array();
       foreach ($instances as $instance) {
-        $options_instances[] = $instance['entity_type'] .':'. $instance['bundle'] .' ('. check_plain($instance['label']) .')';
+        $options_instances[] = $instance['entity_type'] . ':' . $instance['bundle'] . ' (' . check_plain($instance['label']) . ')';
       }
       $translate_array['@instances'] = implode(', ', $options_instances);
-      $field_options[$key] = t('@field_name: Appears in [@instances]', $translate_array);
+      $field_options[$key] = t($field_info['type'] . ' @field_name: Appears in [@instances]', $translate_array);
     }
 
     $form['field_information'] = array(
@@ -87,39 +91,47 @@ function entityreference_migration_migrate_references_fields_submit($form, &$for
 
   foreach ($values['field_options'] as $key => $field_option) {
     if (!empty($field_option)) {
+      $field_name = $field_infos[$key]['field_name'];
+      // Create table for migration.
+      $table_name = _field_sql_storage_tablename($field_infos[$key]);
+      $temp_table_name = substr('er_m_' . $table_name, 0, 63);
+      $field_instances = field_read_instances(
+        array('field_name' => $field_name),
+        array('include_inactive' => TRUE, 'include_deleted' => TRUE)
+      );
       $batch['operations'][] = array(
-        '_entityreference_migration_references_field', array($key, $field_infos[$key]),
+        '_entity_reference_migration_copy_temporary_table', array($key, $field_infos[$key], $field_name, $field_instances, $table_name, $temp_table_name),
+      );
+      $batch['operations'][] = array(
+        '_entityreference_migration_purge_references_field', array($key, $field_infos[$key], $field_name, $field_instances, $table_name, $temp_table_name),
+      );
+      $batch['operations'][] = array(
+        '_entityreference_migration_migrate_temporary_references_field', array($key, $field_infos[$key], $field_name, $field_instances, $table_name, $temp_table_name),
       );
     }
   }
   batch_set($batch);
-}
 
-function _entityreference_migration_batches_finished($success, $results, $operations) {
-  backdrop_set_message(t('Succesfully migrated requested reference fields!'));
-}
-
-function _entityreference_migration_references_field($field_key, $field_info, &$context) {
-  $context['message'] = t("Processing @field_name", array('@field_name' => $field_info['field_name']));
-
-  if (!in_array($field_info['type'], array('node_reference', 'user_reference'))) {
-    backdrop_set_message(t("Field @field is not a references field.", array('@field' => $field_info['field_name'])), 'error');
-  }
-  else {
-    _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info, $context);
-    backdrop_set_message(t("Processed @field_name", array('@field_name' => $field_info['field_name'])));
+  cache_flush('cache_field');
+  $entity_types = array_keys(entity_get_info());
+  foreach ($entity_types as $entity_type) {
+    cache_flush('cache_entity_' . $entity_type);
   }
 }
 
 /**
- * Migrate a field from references to entityreference.
+ * Callback for finished step in Batch API.
  */
-function _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info) {
-  $field_name = $field_info['field_name'];
+function _entityreference_migration_batches_finished($success, $results, $operations) {
+  backdrop_set_message(t('Succesfully migrated requested reference fields!'));
+}
 
-  // Create table for migration.
-  $table_name = _field_sql_storage_tablename($field_info);
-  $temp_table_name = substr('er_m_' . $table_name, 0, 63);
+/**
+ * Copy data to temporary table.
+ *
+ * Operations callback for Batch API.
+ */
+function _entity_reference_migration_copy_temporary_table($field_key, $field_info, $field_name, $field_instances, $table_name, $temp_table_name, &$context) {
   if (!db_table_exists($temp_table_name)) {
     $schema = backdrop_get_schema($table_name, TRUE);
     $schema['name'] = $temp_table_name;
@@ -128,107 +140,116 @@ function _entityreference_migration_references_field_to_entityreference_field($f
 
   // Export data.
   if (db_table_exists($table_name)) {
-    $results = db_select($table_name)
-      ->fields($table_name)
-      ->execute()
-      ->fetchAll(PDO::FETCH_ASSOC);
-    if ($results) {
-
-      db_truncate($temp_table_name)->execute();
-
-      $result = array_shift($results);
-      $insert = db_insert($temp_table_name);
-      $insert->fields(array_keys($result), $result);
-      foreach ($results as $result) {
-        $insert->values($result);
-      }
-      $insert->execute();
-    }
-  }
-
-  // Migrate any views.
-  if (module_exists('views')) {
-    $views = views_get_all_views(TRUE);
-    foreach ($views as $view) {
-      // Let us first try with arguments.
-      $current_argument_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
-      $new_argument_field = $field_name .'_target_id';
-      foreach ($view->display as $display_key => $display) {
-        if (!empty($display->display_options['arguments'])) {
-          foreach ($display->display_options['arguments'] as $argument_key => $argument) {
-            if (!empty($argument['field']) && $argument['field'] == $current_argument_field) {
-              $new_argument_key = str_replace($current_argument_field, $new_argument_field, $argument_key);
-              $view->display[$display_key]->display_options['arguments'][$new_argument_key] = $view->display[$display_key]->display_options['arguments'][$argument_key];
-              $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['id']);
-              $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field'] = str_replace($current_argument_field, $new_argument_field, $view->display[$display_key]->display_options['arguments'][$new_argument_key]['field']);
-              unset($view->display[$display_key]->display_options['arguments'][$argument_key]);
-              $view->save();
-            }
-          }
-        }
+    $fields = array();
+    foreach ($schema['fields'] as $key => $value) {
+      if ($key !== 'er_m_id') {
+        $fields[] = $key;
       }
     }
+    $query = db_select($table_name)
+      ->fields($table_name, $fields);
+
+    db_insert($temp_table_name)
+      ->from($query)
+      ->execute();
   }
+}
 
-  // Store instances to be able to recreate them.
-  $instances = field_read_instances(
-    array('field_name' => $field_name),
-    array('include_inactive' => TRUE, 'include_deleted' => TRUE)
-  );
-
-  foreach ($instances as $instance) {
+/**
+ * Delete and purge reference fields.
+ *
+ * Operations callback for Batch API.
+ */
+function _entityreference_migration_purge_references_field($field_key, $field_info, $field_name, $field_instances, $table_name, $temp_table_name, &$context) {
+  // By default if all instances are deleted the field will be marked for deletion too.
+  foreach ($field_instances as $instance) {
     field_delete_instance($instance);
-    field_purge_instance($instance);
+    _entityreference_migration_purge_instance($instance);
   }
-  field_delete_field($field_name);
-  field_purge_field($field_info);
+  _entityreference_migration_purge_field($field_info);
+}
 
-  $entityreference_field = _entityreference_migration_references_field_to_entityreference_field_create_field($field_info);
+/**
+ * Migrate temporary reference fields.
+ *
+ * Operations callback for Batch API.
+ */
+function _entityreference_migration_migrate_temporary_references_field($field_key, $field_info, $field_name, $field_instances, $table_name, $temp_table_name, &$context) {
+  $context['message'] = t("Processing @field_name", array('@field_name' => $field_info['field_name']));
 
-  // Create the field instances
-  foreach ($instances as $instance) {
-    _entityreference_migration_references_field_to_entityreference_field_create_instance($entityreference_field, $instance);
+  if (!in_array($field_info['type'], array('node_reference', 'user_reference', 'taxonomy_term_reference'))) {
+    backdrop_set_message(t("Field @field is not a references field.", array('@field' => $field_name)), 'error');
+  } else {
+    _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info, $field_name, $field_instances, $table_name, $temp_table_name, $context);
   }
+}
 
-  $entityreference_table_name = _field_sql_storage_tablename($entityreference_field);
-  $entityreference_revision_table_name = _field_sql_storage_revision_tablename($entityreference_field);
+/**
+ * Migrate a field from references to entityreference.
+ */
+function _entityreference_migration_references_field_to_entityreference_field($field_key, $field_info, $field_name, $field_instances, $table_name, $temp_table_name, &$context) {
+  if (!isset($context['sandbox']['entityreference_table_name'])) {
+
+    $context['message'] = t("Processing @field_name", array('@field_name' => $field_info['field_name']));
+    $entityreference_field = _entityreference_migration_references_field_to_entityreference_field_create_field($field_info);
+
+    // Create the field instances
+    foreach ($field_instances as $instance) {
+      _entityreference_migration_references_field_to_entityreference_field_create_instance($entityreference_field, $instance);
+    }
+
+    $context['sandbox']['entityreference_table_name'] = _field_sql_storage_tablename($entityreference_field);
+    $context['sandbox']['entityreference_revision_table_name'] = _field_sql_storage_revision_tablename($entityreference_field);
+  }
 
   // And now migrate data.
   $results = db_select($temp_table_name)
     ->fields($temp_table_name)
+    ->range(0, 100)
     ->execute()
     ->fetchAll(PDO::FETCH_ASSOC);
 
   if ($results) {
-    db_truncate($entityreference_table_name)->execute();
-    db_truncate($entityreference_revision_table_name)->execute();
+    $context['finished'] = 0;
 
-    $insert = db_insert($entityreference_table_name);
-    $insert_revision = db_insert($entityreference_revision_table_name);
+    $insert = db_insert($context['sandbox']['entityreference_table_name']);
+    $insert_revision = db_insert($context['sandbox']['entityreference_revision_table_name']);
     foreach ($results as $key => $result) {
-      $target_id_field = $field_name . (($field_info['type'] == 'node_reference') ? '_nid' : '_uid');
+      if ($field_info['type'] == 'node_reference') {
+        $target_id_field = $field_name . '_nid';
+      } else if ($field_info['type'] == 'user_reference') {
+        $target_id_field = $field_name . '_uid';
+      } else if ($field_info['type'] == 'taxonomy_term_reference') {
+        $target_id_field = $field_name . '_tid';
+      }
       $result[$field_name . '_target_id'] = $result[$target_id_field];
       unset($result[$target_id_field]);
 
-      if ($key) {
-        $insert->values($result);
-        $insert_revision->values($result);
+      // Ensure the field value is not NULL to avoid MySQL Exceptions
+      if ($result[$field_name . '_target_id'] != NULL) {
+        if ($key) {
+          $insert->values($result);
+          $insert_revision->values($result);
+        } else {
+          $insert->fields(array_keys($result), $result);
+          $insert_revision->fields(array_keys($result), $result);
+        }
       }
-      else {
-        $insert->fields(array_keys($result), $result);
-        $insert_revision->fields(array_keys($result), $result);
-      }
+
+      db_delete($temp_table_name)
+        ->condition('entity_type', $result['entity_type'])
+        ->condition('entity_id', $result['entity_id'])
+        ->condition('deleted', $result['deleted'])
+        ->condition('delta', $result['delta'])
+        ->condition('language', $result['language'])
+        ->execute();
     }
     $insert->execute();
     $insert_revision->execute();
-
+  } else {
     db_drop_table($temp_table_name);
-
-    cache_flush('cache_field');
-    $entity_types = array_keys(entity_get_info());
-    foreach ($entity_types as $entity_type) {
-      cache_flush('cache_entity_' . $entity_type);
-    }
+    $context['finished'] = 1.0;
+    backdrop_set_message(t("Processed @field_name", array('@field_name' => $field_info['field_name'])));
   }
 }
 
@@ -239,10 +260,22 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
   $field_name = $field_info['field_name'];
   // Recreate fields by using entityreference.
   $target_bundles = array();
-  if (isset($field_info['settings']['referenceable_types'])) {
-    $target_bundles = array_filter($field_info['settings']['referenceable_types']);
+  $field_type = $field_info['type'];
+  if ($field_type == 'node_reference') {
+    $target_type = 'node';
+    if (isset($field_info['settings']['referenceable_types'])) {
+      $target_bundles = array_filter($field_info['settings']['referenceable_types']);
+    }
+  } else if ($field_type == 'user_reference') {
+    $target_type = 'user';
+    if (isset($field_info['settings']['referenceable_types'])) {
+      $target_bundles = array_filter($field_info['settings']['referenceable_types']);
+    }
+  } else if ($field_type == 'taxonomy_term_reference') {
+    $target_type = 'taxonomy_term';
+    $bundle = $field_info['settings']['allowed_values'][0]['vocabulary'];
+    $target_bundles[$bundle] = $bundle;
   }
-
   $entityreference_field = array(
     'field_name' => $field_name,
     'type' => 'entityreference',
@@ -256,11 +289,11 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
     ),
     'settings' => array(
       'handler' => 'base',
-      'handler_settings' => array (
+      'handler_settings' => array(
         'target_bundles' => $target_bundles,
       ),
       'handler_submit' => 'Change handler',
-      'target_type' => (($field_info['type'] == 'node_reference') ? 'node' : 'user'),
+      'target_type' => $target_type,
     ),
     'cardinality' => $field_info['cardinality'],
     'locked' => $field_info['locked'],
@@ -287,10 +320,16 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
   );
   // Add in the widget and appropriate settings (TODO for more flexibility)
   if (isset($instance['widget'])) {
+    $widget_type = 'entityreference_autocomplete';
+    $widget_module = 'entityreference';
+    if ($instance['widget']['module'] == 'options') {
+      $widget_type = $instance['widget']['type'];
+      $widget_module = $instance['widget']['module'];
+    }
     $entityreference_instance['widget'] = array(
       'weight' => $instance['widget']['weight'],
-      'type' => 'entityreference_autocomplete',
-      'module' => 'entityreference',
+      'type' => $widget_type,
+      'module' => $widget_module,
       'active' => 1,
       'settings' => array(
         'match_operator' => 'CONTAINS',
@@ -307,19 +346,19 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
         'weight' => $instance_display['weight'],
         'module' => 'entityreference',
       );
-      if ($instance_display['type'] == 'node_reference_node' || $instance_display['type'] == 'user_reference_user') {
+      if ($instance_display['type'] == 'hidden') {
+        $entityreference_instance['display'][$display_name]['type'] = 'hidden';
+      } else if ($instance_display['type'] == 'node_reference_node' || $instance_display['type'] == 'user_reference_user') {
         $entityreference_instance['display'][$display_name]['type'] = 'entityreference_entity_view';
         $entityreference_instance['display'][$display_name]['settings'] = array(
-          'view_mode' => $instance_display['settings'][$instance_display['module'] .'_view_mode'],
+          'view_mode' => $instance_display['settings'][$instance_display['module'] . '_view_mode'],
         );
-      }
-      else if ($instance_display['type'] == 'node_reference_default' || $instance_display['type'] == 'user_reference_default') {
+      } else if ($instance_display['type'] == 'node_reference_default' || $instance_display['type'] == 'user_reference_default') {
         $entityreference_instance['display'][$display_name]['type'] = 'entityreference_label';
         $entityreference_instance['display'][$display_name]['settings'] = array(
           'link' => TRUE,
         );
-      }
-      else {
+      } else {
         $entityreference_instance['display'][$display_name]['type'] = 'entityreference_label';
         $entityreference_instance['display'][$display_name]['settings'] = array(
           'link' => TRUE,
@@ -329,4 +368,51 @@ function _entityreference_migration_references_field_to_entityreference_field_cr
   }
   $entityreference_instance = field_create_instance($entityreference_instance);
   return $entityreference_instance;
+}
+
+/**
+ * Purges a field instance record from the database.
+ *
+ * This function assumes all data for the instance has already been purged.
+ *
+ * @param $instance
+ *   The instance record to purge.
+ */
+function _entityreference_migration_purge_instance($instance) {
+  $config = config('field.instance.' . $instance['entity_type'] . '.' . $instance['bundle'] . '.' . $instance['field_name']);
+  $config->delete();
+
+  // Notify the storage engine.
+  $field = field_info_field($instance['field_name']);
+  if (!empty($field['storage']['module'])) {
+    module_invoke($field['storage']['module'], 'field_storage_purge_instance', $instance);
+  }
+
+  // Clear the cache.
+  field_info_cache_clear();
+}
+
+/**
+ * Purges a field configuration.
+ *
+ * This function assumes all instances for the field has already been purged,
+ * and should only be called by field_purge_batch().
+ *
+ * @param $field
+ *   The field record to purge.
+ */
+function _entityreference_migration_purge_field($field) {
+  $instances = field_read_instances(array('field_name' => $field['field_name']), array('include_deleted' => TRUE));
+  if (count($instances) > 0) {
+    throw new FieldException(t('Attempt to purge a field @field_name that still has instances.', array('@field_name' => $field['field_name'])));
+  }
+
+  $config = config('field.field.' . $field['field_name']);
+  $config->delete();
+
+  // Notify the storage engine.
+  module_invoke($field['storage']['module'], 'field_storage_purge_field', $field);
+
+  // Clear the cache.
+  field_info_cache_clear();
 }
