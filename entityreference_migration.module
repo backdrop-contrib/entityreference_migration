@@ -112,8 +112,7 @@ function entityreference_migration_migrate_references_fields_submit($form, &$for
   }
   batch_set($batch);
 
-  cache_flush('cache_field');
-  entity_flush_caches();
+  backdrop_flush_all_caches();
 }
 
 /**
